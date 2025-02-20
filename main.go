@@ -211,6 +211,8 @@ func main() {
 				},
 			})
 
+			time.Sleep(200 * time.Millisecond)
+
 			mainthread.Wait(func() {
 				topicMapMutex.RLock()
 				RebuildTree(&topicMap)
