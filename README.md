@@ -1,3 +1,6 @@
+> [!IMPORTANT]
+> This project is far from being stable, don't except it to work properly (at least for now).
+
 # MQTT Compass
 
 A Simple MQTT Browser (Golang + QT6). It's inspired by MQTT Explorer.
