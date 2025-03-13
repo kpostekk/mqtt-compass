@@ -1,8 +1,10 @@
-module mqtt-compass
+module mqui
 
 go 1.23.6
 
-require github.com/mappu/miqt v0.8.1-0.20250215054030-f0517fb08888
+require github.com/mappu/miqt v0.9.0
+
+require golang.org/x/sys v0.22.0 // indirect
 
 require (
 	github.com/eclipse/paho.golang v0.22.0
