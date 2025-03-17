@@ -2,19 +2,18 @@ package ui
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"os"
+	"strings"
 	"sync"
 	"time"
-
-	// "time"
+	"unsafe"
 
 	"github.com/eclipse/paho.golang/autopaho"
 	"github.com/eclipse/paho.golang/paho"
 	"github.com/mappu/miqt/qt6"
 	"github.com/mappu/miqt/qt6/mainthread"
-
-	// "github.com/mappu/miqt/qt6/mainthread"
 
 	"mqui/compass/mqtt"
 	"mqui/compass/mqtt/topics"
@@ -24,11 +23,14 @@ type AppUi struct {
 	MainWindow         *qt6.QMainWindow
 	CurrentConnection  *autopaho.ConnectionManager
 	CurrentTreeWidget  *qt6.QTreeWidget
+	CurrentFilterInput *qt6.QLineEdit
 	MapTopicPacket     map[string]*topics.IncomingPacket
 	MapTopicQTreeEntry map[string]*qt6.QTreeWidgetItem
-	MapQTreeItemTopic  map[*qt6.QTreeWidgetItem]string
-	TopicLock          sync.RWMutex
-	InitialDraw        bool
+	// MapQTreeItemTopic       map[*qt6.QTreeWidgetItem]string
+	MapUnsafeQTreeItemTopic map[unsafe.Pointer]string
+	TopicLock               sync.RWMutex
+	CurrentFilterText       string
+	InitialDraw             bool
 }
 
 func NewAppUi() *AppUi {
@@ -59,18 +61,21 @@ func NewAppUi() *AppUi {
 	widgetMain.SetLayout(layoutMain.QLayout)
 	windowMain.SetCentralWidget(widgetMain)
 
-	brokerViewer, brokerTreeWidget := NewBrokerViewer(widgetMain)
+	brokerViewer, brokerTreeWidget, brokerFilterField := NewBrokerViewer(widgetMain)
 
 	layoutMain.AddWidget(brokerViewer)
 
 	return &AppUi{
 		MainWindow:         windowMain,
 		CurrentTreeWidget:  brokerTreeWidget,
+		CurrentFilterInput: brokerFilterField,
 		MapTopicQTreeEntry: make(map[string]*qt6.QTreeWidgetItem),
 		MapTopicPacket:     make(map[string]*topics.IncomingPacket),
-		MapQTreeItemTopic:  make(map[*qt6.QTreeWidgetItem]string),
-		InitialDraw:        true,
-		TopicLock:          sync.RWMutex{},
+		// MapQTreeItemTopic:       make(map[*qt6.QTreeWidgetItem]string),
+		MapUnsafeQTreeItemTopic: make(map[unsafe.Pointer]string),
+		InitialDraw:             true,
+		TopicLock:               sync.RWMutex{},
+		CurrentFilterText:       "",
 	}
 }
 
@@ -85,11 +90,10 @@ func (app *AppUi) SetConnection(ctx *context.Context) {
 	})
 
 	router.RegisterHandler("#", func(p *paho.Publish) {
-		app.TopicLock.Lock()
-
 		incomingPacket := topics.IncomingPacket(*p.Packet())
-		topicTree.AddPacket(&incomingPacket)
 
+		app.TopicLock.Lock()
+		topicTree.AddPacket(&incomingPacket)
 		app.TopicLock.Unlock()
 	})
 
@@ -109,7 +113,7 @@ func (app *AppUi) SetConnection(ctx *context.Context) {
 	connectionManager.Subscribe(*ctx, &paho.Subscribe{
 		Subscriptions: []paho.SubscribeOptions{
 			{
-				Topic: "#",
+				Topic: "ledatel_pr116/+/state/+",
 			},
 		},
 	})
@@ -120,36 +124,25 @@ func (app *AppUi) SetConnection(ctx *context.Context) {
 	app.CurrentTreeWidget.OnSelectionChanged(func(super func(selected *qt6.QItemSelection, deselected *qt6.QItemSelection), selected, deselected *qt6.QItemSelection) {
 		super(selected, deselected)
 
-		selectedItem := app.CurrentTreeWidget.CurrentItem()
+		app.TopicLock.Lock()
 
-		app.TopicLock.RLock()
-		log.Println("Selected item", selectedItem, selectedItem.Text(0) == app.MapQTreeItemTopic[selectedItem])
-		if selectedItem.Text(0) != app.MapQTreeItemTopic[selectedItem] {
-			log.Println(selectedItem.Text(0), app.MapQTreeItemTopic[selectedItem], selectedItem)
+		selectedItemUP := app.CurrentTreeWidget.CurrentItem().UnsafePointer()
+		selectedTopic := app.MapUnsafeQTreeItemTopic[selectedItemUP]
+		selectedPacket := app.MapTopicPacket[selectedTopic]
+		fmt.Println(selectedTopic, selectedPacket)
 
-			for k, v := range app.MapQTreeItemTopic {
-				log.Println(k.Text(0) == v, k.Text(0), v)
-			}
-		}
-		// for item, packet := range app.MapQTreeItemPacket {
-		// 	log.Println("Candidate", item, item.Text(0) == packet.Topic, packet.Topic)
-		// }
-
-		// if packet, ok := app.MapQTreeItemPacket[selectedItem]; ok {
-		// 	log.Println("Selected item has packet", packet.Topic)
-		// }
-
-		app.TopicLock.RUnlock()
+		app.TopicLock.Unlock()
 
 	})
 
 	go func() {
-		for range ticker.C {
+		for {
+			<-ticker.C
+			app.TopicLock.Lock()
+
 			mainthread.Wait(func() {
-				app.TopicLock.Lock()
 				app.UpdateTree(topicTree)
 				topicTree = topics.CreateVirtualTopicTree()
-				app.TopicLock.Unlock()
 
 				if app.InitialDraw {
 					app.CurrentTreeWidget.ExpandAll()
@@ -157,8 +150,17 @@ func (app *AppUi) SetConnection(ctx *context.Context) {
 					app.InitialDraw = false
 				}
 			})
+
+			app.TopicLock.Unlock()
 		}
 	}()
+
+	app.SetupFiltering()
+
+	mainthread.Wait(func() {
+		app.CurrentTreeWidget.SetFocus()
+	})
+
 }
 
 func (a *AppUi) UpdateTree(tree *topics.VirtualTopicTree) *qt6.QTreeWidgetItem {
@@ -179,6 +181,8 @@ func (a *AppUi) UpdateTree(tree *topics.VirtualTopicTree) *qt6.QTreeWidgetItem {
 
 		if tree.RelatedPacket != nil {
 			item.SetText(1, string(tree.RelatedPacket.Payload))
+			a.MapTopicPacket[contextualPathString] = tree.RelatedPacket
+			// go blinkUpdateItem(item)
 		}
 
 		for _, child := range tree.Children {
@@ -190,13 +194,21 @@ func (a *AppUi) UpdateTree(tree *topics.VirtualTopicTree) *qt6.QTreeWidgetItem {
 
 	item = qt6.NewQTreeWidgetItem()
 
-	item.SetText(0, contextualPathString)
+	item.SetText(0, tree.ContextualPath[len(tree.ContextualPath)-1])
 
 	if tree.RelatedPacket != nil {
 		item.SetText(1, string(tree.RelatedPacket.Payload))
-		// a.MapQTreeItemPacket[item] = tree.RelatedPacket
+		a.MapTopicPacket[contextualPathString] = tree.RelatedPacket
 		log.Default().Println("Created", contextualPathString, item)
 	}
+
+	font := item.Font(0)
+	if tree.IsVirtual() {
+		font.SetItalic(true)
+	} else {
+		font.SetItalic(false)
+	}
+	item.SetFont(0, font)
 
 	for _, child := range tree.Children {
 		childItem := a.UpdateTree(child)
@@ -208,23 +220,89 @@ func (a *AppUi) UpdateTree(tree *topics.VirtualTopicTree) *qt6.QTreeWidgetItem {
 	}
 
 	a.MapTopicQTreeEntry[contextualPathString] = item
-	a.MapQTreeItemTopic[item] = contextualPathString
+	a.MapUnsafeQTreeItemTopic[item.UnsafePointer()] = contextualPathString
 
 	return item
 }
 
-func NewBrokerViewer(parent *qt6.QWidget) (*qt6.QWidget, *qt6.QTreeWidget) {
+func blinkUpdateItem(item *qt6.QTreeWidgetItem) {
+	font := item.Font(0)
+	font.SetBold(true)
+	mainthread.Wait(func() {
+		item.SetFont(0, font)
+	})
+
+	time.Sleep(200 * time.Millisecond)
+
+	font.SetBold(false)
+	mainthread.Wait(func() {
+		item.SetFont(0, font)
+	})
+}
+
+func (app *AppUi) ShowWithParents(item *qt6.QTreeWidgetItem) {
+	if item.Parent() != nil {
+		app.ShowWithParents(item.Parent())
+	}
+
+	item.SetHidden(false)
+}
+
+func (app *AppUi) UpdateFiltersResults() {
+	if app.CurrentFilterText == "" {
+		for _, item := range app.MapTopicQTreeEntry {
+			item.SetHidden(false)
+		}
+
+		return
+	}
+
+	for _, item := range app.MapTopicQTreeEntry {
+		item.SetHidden(true)
+	}
+
+	for topic, item := range app.MapTopicQTreeEntry {
+		matches := strings.Contains(topic, app.CurrentFilterText)
+
+		if matches {
+			app.ShowWithParents(item)
+		}
+	}
+}
+
+func (app *AppUi) SetupFiltering() {
+	app.CurrentFilterInput.OnTextChanged(func(text string) {
+		app.CurrentFilterText = text
+
+		go func() {
+			app.TopicLock.RLock()
+			mainthread.Wait(func() {
+				app.UpdateFiltersResults()
+			})
+			app.TopicLock.RUnlock()
+		}()
+	})
+}
+
+func NewBrokerViewer(parent *qt6.QWidget) (*qt6.QWidget, *qt6.QTreeWidget, *qt6.QLineEdit) {
 	viewerWidget := qt6.NewQWidget(parent)
 	layout := qt6.NewQHBoxLayout(viewerWidget)
 
 	layout.SetSpacing(12)
 	viewerWidget.SetLayout(layout.QLayout)
 
+	topicsLayout := qt6.NewQVBoxLayout(viewerWidget)
+	topicsLayout.SetSpacing(12)
+	layout.AddLayout(topicsLayout.QLayout)
+
+	filterInput := qt6.NewQLineEdit(viewerWidget)
+	topicsLayout.AddWidget(filterInput.QWidget)
+
 	topicTreeWidget := qt6.NewQTreeWidget(viewerWidget)
 	topicTreeWidget.SetColumnCount(2)
 	topicTreeWidget.SetHeaderLabels([]string{"Topic", "Value"})
 	topicTreeWidget.SetSortingEnabled(true)
-	layout.AddWidget(topicTreeWidget.QWidget)
+	topicsLayout.AddWidget(topicTreeWidget.QWidget)
 
 	detailsWidget := qt6.NewQWidget(viewerWidget)
 	detailsLayout := qt6.NewQVBoxLayout(detailsWidget)
@@ -244,7 +322,7 @@ func NewBrokerViewer(parent *qt6.QWidget) (*qt6.QWidget, *qt6.QTreeWidget) {
 	subscriptionsButton.SetIcon(qt6.QIcon_FromTheme("list-add"))
 	detailsLayout.AddWidget(subscriptionsButton.QWidget)
 
-	return viewerWidget, topicTreeWidget
+	return viewerWidget, topicTreeWidget, filterInput
 }
 
 func NewConnectDialog(parent *qt6.QWidget) *qt6.QDialog {
