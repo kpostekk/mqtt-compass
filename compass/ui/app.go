@@ -3,6 +3,7 @@ package ui
 import (
 	"context"
 	"log"
+	"os"
 	"sync"
 	"time"
 
@@ -25,6 +26,7 @@ type AppUi struct {
 	CurrentTreeWidget  *qt6.QTreeWidget
 	MapTopicPacket     map[string]*topics.IncomingPacket
 	MapTopicQTreeEntry map[string]*qt6.QTreeWidgetItem
+	MapQTreeItemTopic  map[*qt6.QTreeWidgetItem]string
 	TopicLock          sync.RWMutex
 	InitialDraw        bool
 }
@@ -66,6 +68,7 @@ func NewAppUi() *AppUi {
 		CurrentTreeWidget:  brokerTreeWidget,
 		MapTopicQTreeEntry: make(map[string]*qt6.QTreeWidgetItem),
 		MapTopicPacket:     make(map[string]*topics.IncomingPacket),
+		MapQTreeItemTopic:  make(map[*qt6.QTreeWidgetItem]string),
 		InitialDraw:        true,
 		TopicLock:          sync.RWMutex{},
 	}
@@ -75,7 +78,7 @@ func (app *AppUi) SetConnection(ctx *context.Context) {
 	topicTree := topics.CreateVirtualTopicTree()
 
 	config, router, error := mqtt.CreateMqttConnectionConfigConfig(mqtt.MiniConfig{
-		ServerUrl: "mqtt://127.0.0.1:31883",
+		ServerUrl: os.Getenv("DEFAULT_MQTT_URL"),
 		KeepAlive: 60,
 		Username:  "",
 		Password:  "",
@@ -119,19 +122,25 @@ func (app *AppUi) SetConnection(ctx *context.Context) {
 
 		selectedItem := app.CurrentTreeWidget.CurrentItem()
 
-		go func() {
-			app.TopicLock.Lock()
-			log.Println("Selected item", selectedItem)
-			for item, packet := range app.MapQTreeItemPacket {
-				log.Println("Candidate", item, item.Text(0) == packet.Topic, packet.Topic)
-			}
+		app.TopicLock.RLock()
+		log.Println("Selected item", selectedItem, selectedItem.Text(0) == app.MapQTreeItemTopic[selectedItem])
+		if selectedItem.Text(0) != app.MapQTreeItemTopic[selectedItem] {
+			log.Println(selectedItem.Text(0), app.MapQTreeItemTopic[selectedItem], selectedItem)
 
-			if packet, ok := app.MapQTreeItemPacket[selectedItem]; ok {
-				log.Println("Selected item has packet", packet.Topic)
+			for k, v := range app.MapQTreeItemTopic {
+				log.Println(k.Text(0) == v, k.Text(0), v)
 			}
+		}
+		// for item, packet := range app.MapQTreeItemPacket {
+		// 	log.Println("Candidate", item, item.Text(0) == packet.Topic, packet.Topic)
+		// }
 
-			app.TopicLock.Unlock()
-		}()
+		// if packet, ok := app.MapQTreeItemPacket[selectedItem]; ok {
+		// 	log.Println("Selected item has packet", packet.Topic)
+		// }
+
+		app.TopicLock.RUnlock()
+
 	})
 
 	go func() {
@@ -180,13 +189,12 @@ func (a *AppUi) UpdateTree(tree *topics.VirtualTopicTree) *qt6.QTreeWidgetItem {
 	}
 
 	item = qt6.NewQTreeWidgetItem()
-	a.MapTopicQTreeEntry[contextualPathString] = item
 
 	item.SetText(0, contextualPathString)
 
 	if tree.RelatedPacket != nil {
 		item.SetText(1, string(tree.RelatedPacket.Payload))
-		a.MapQTreeItemPacket[item] = tree.RelatedPacket
+		// a.MapQTreeItemPacket[item] = tree.RelatedPacket
 		log.Default().Println("Created", contextualPathString, item)
 	}
 
@@ -198,6 +206,9 @@ func (a *AppUi) UpdateTree(tree *topics.VirtualTopicTree) *qt6.QTreeWidgetItem {
 	if tree.ContextualPath.IsRoot() {
 		a.CurrentTreeWidget.AddTopLevelItem(item)
 	}
+
+	a.MapTopicQTreeEntry[contextualPathString] = item
+	a.MapQTreeItemTopic[item] = contextualPathString
 
 	return item
 }

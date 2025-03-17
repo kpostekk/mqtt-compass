@@ -16,11 +16,13 @@ import (
 
 	"github.com/eclipse/paho.golang/paho"
 	"github.com/mappu/miqt/qt6"
+	"github.com/joho/godotenv"
 )
 
 const URL_REGEX = `^mqtts?://[0-9a-zA-Z\.\-]+(:[0-9]+)?$`
 
 func StartUi() {
+	godotenv.Load()
 	ctx, _ := context.WithCancel(context.Background())
 
 	log.Default().Println("Hello, World!")
@@ -40,7 +42,7 @@ func StartHeadless() {
 	topicMutex := sync.RWMutex{}
 
 	config, router, error := mqtt.CreateMqttConnectionConfigConfig(mqtt.MiniConfig{
-		ServerUrl: "mqtt://127.0.0.1:31883",
+		ServerUrl: os.Getenv("DEFAULT_MQTT_URL"),
 		KeepAlive: 60,
 		Username:  "",
 		Password:  "",
