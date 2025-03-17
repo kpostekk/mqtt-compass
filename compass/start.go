@@ -30,7 +30,7 @@ func StartUi() {
 
 	appUi := ui.NewAppUi()
 	appUi.MainWindow.Show()
-	appUi.SetConnection(&ctx)
+	go appUi.SetConnection(&ctx)
 
 	qt6.QApplication_Exec()
 }
