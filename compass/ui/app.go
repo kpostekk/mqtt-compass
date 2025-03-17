@@ -20,13 +20,12 @@ import (
 )
 
 type AppUi struct {
-	MainWindow         *qt6.QMainWindow
-	CurrentConnection  *autopaho.ConnectionManager
-	CurrentTreeWidget  *qt6.QTreeWidget
-	CurrentFilterInput *qt6.QLineEdit
-	MapTopicPacket     map[string]*topics.IncomingPacket
-	MapTopicQTreeEntry map[string]*qt6.QTreeWidgetItem
-	// MapQTreeItemTopic       map[*qt6.QTreeWidgetItem]string
+	MainWindow              *qt6.QMainWindow
+	CurrentConnection       *autopaho.ConnectionManager
+	CurrentTreeWidget       *qt6.QTreeWidget
+	CurrentFilterInput      *qt6.QLineEdit
+	MapTopicPacket          map[string]*topics.IncomingPacket
+	MapTopicQTreeEntry      map[string]*qt6.QTreeWidgetItem
 	MapUnsafeQTreeItemTopic map[unsafe.Pointer]string
 	TopicLock               sync.RWMutex
 	CurrentFilterText       string
@@ -66,12 +65,11 @@ func NewAppUi() *AppUi {
 	layoutMain.AddWidget(brokerViewer)
 
 	return &AppUi{
-		MainWindow:         windowMain,
-		CurrentTreeWidget:  brokerTreeWidget,
-		CurrentFilterInput: brokerFilterField,
-		MapTopicQTreeEntry: make(map[string]*qt6.QTreeWidgetItem),
-		MapTopicPacket:     make(map[string]*topics.IncomingPacket),
-		// MapQTreeItemTopic:       make(map[*qt6.QTreeWidgetItem]string),
+		MainWindow:              windowMain,
+		CurrentTreeWidget:       brokerTreeWidget,
+		CurrentFilterInput:      brokerFilterField,
+		MapTopicQTreeEntry:      make(map[string]*qt6.QTreeWidgetItem),
+		MapTopicPacket:          make(map[string]*topics.IncomingPacket),
 		MapUnsafeQTreeItemTopic: make(map[unsafe.Pointer]string),
 		InitialDraw:             true,
 		TopicLock:               sync.RWMutex{},
@@ -113,7 +111,7 @@ func (app *AppUi) SetConnection(ctx *context.Context) {
 	connectionManager.Subscribe(*ctx, &paho.Subscribe{
 		Subscriptions: []paho.SubscribeOptions{
 			{
-				Topic: "ledatel_pr116/+/state/+",
+				Topic: "+/state/+",
 			},
 		},
 	})
@@ -132,7 +130,6 @@ func (app *AppUi) SetConnection(ctx *context.Context) {
 		fmt.Println(selectedTopic, selectedPacket)
 
 		app.TopicLock.Unlock()
-
 	})
 
 	go func() {
