@@ -51,6 +51,18 @@ func (tree *VirtualTopicTree) IsVirtual() bool {
 	return tree.RelatedPacket == nil
 }
 
+func (tree *VirtualTopicTree) IsLeaf() bool {
+	return len(tree.Children) == 0
+}
+
+func (tree *VirtualTopicTree) ToRoot() *VirtualTopicTree {
+	if tree.IsRoot() {
+		return tree
+	}
+
+	return tree.Parent.ToRoot()
+}
+
 func (tree *VirtualTopicTree) String() string {
 	sb := strings.Builder{}
 

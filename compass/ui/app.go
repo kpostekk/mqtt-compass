@@ -7,7 +7,6 @@ import (
 	"os"
 	"strings"
 	"sync"
-	"time"
 	"unsafe"
 
 	"github.com/eclipse/paho.golang/autopaho"
@@ -78,7 +77,7 @@ func NewAppUi() *AppUi {
 }
 
 func (app *AppUi) SetConnection(ctx *context.Context) {
-	topicTree := topics.CreateVirtualTopicTree()
+	packetChan := make(chan *topics.IncomingPacket)
 
 	config, router, error := mqtt.CreateMqttConnectionConfigConfig(mqtt.MiniConfig{
 		ServerUrl: os.Getenv("DEFAULT_MQTT_URL"),
@@ -90,9 +89,7 @@ func (app *AppUi) SetConnection(ctx *context.Context) {
 	router.RegisterHandler("#", func(p *paho.Publish) {
 		incomingPacket := topics.IncomingPacket(*p.Packet())
 
-		app.TopicLock.Lock()
-		topicTree.AddPacket(&incomingPacket)
-		app.TopicLock.Unlock()
+		packetChan <- &incomingPacket
 	})
 
 	if error != nil {
@@ -111,13 +108,13 @@ func (app *AppUi) SetConnection(ctx *context.Context) {
 	connectionManager.Subscribe(*ctx, &paho.Subscribe{
 		Subscriptions: []paho.SubscribeOptions{
 			{
-				Topic: "+/state/+",
+				// Topic: "+/+/state/+",
+				Topic: "#",
 			},
 		},
 	})
 
 	app.CurrentConnection = connectionManager
-	ticker := time.NewTicker(1 * time.Second)
 
 	app.CurrentTreeWidget.OnSelectionChanged(func(super func(selected *qt6.QItemSelection, deselected *qt6.QItemSelection), selected, deselected *qt6.QItemSelection) {
 		super(selected, deselected)
@@ -132,20 +129,22 @@ func (app *AppUi) SetConnection(ctx *context.Context) {
 		app.TopicLock.Unlock()
 	})
 
+	// app.CurrentTreeWidget.SetColumnWidth(0, 240)
+
 	go func() {
+		pt := topics.CreateVirtualTopicTree()
 		for {
-			<-ticker.C
+			rcvPacket := <-packetChan
+			log.Default().Println("Received packet", rcvPacket.Topic)
 			app.TopicLock.Lock()
+			updatesTree := pt.AddPacket(rcvPacket)
 
 			mainthread.Wait(func() {
-				app.UpdateTree(topicTree)
-				topicTree = topics.CreateVirtualTopicTree()
+				app.RenderTreeSkeleton(pt)
+			})
 
-				if app.InitialDraw {
-					app.CurrentTreeWidget.ExpandAll()
-					app.CurrentTreeWidget.ResizeColumnToContents(0)
-					app.InitialDraw = false
-				}
+			mainthread.Wait(func() {
+				app.UpdateTree(updatesTree)
 			})
 
 			app.TopicLock.Unlock()
@@ -157,84 +156,54 @@ func (app *AppUi) SetConnection(ctx *context.Context) {
 	mainthread.Wait(func() {
 		app.CurrentTreeWidget.SetFocus()
 	})
-
 }
 
-func (a *AppUi) UpdateTree(tree *topics.VirtualTopicTree) *qt6.QTreeWidgetItem {
+func (app *AppUi) UpdateTree(tree *topics.VirtualTopicTree) {
+	if tree.RelatedPacket != nil {
+		log.Default().Println("Updating", tree.ContextualPath.String())
+		app.MapTopicQTreeEntry[tree.ContextualPath.String()].SetText(1, string(tree.RelatedPacket.Payload))
+		app.MapTopicPacket[tree.ContextualPath.String()] = tree.RelatedPacket
+	}
+}
+
+func (app *AppUi) RenderTreeSkeleton(tree *topics.VirtualTopicTree) (*qt6.QTreeWidgetItem, bool) {
 	if tree.IsRoot() {
 		for _, child := range tree.Children {
-			a.UpdateTree(child)
+			app.RenderTreeSkeleton(child)
 		}
 
-		return nil
+		return nil, false
 	}
 
-	// check if tree is already in the map
-	contextualPathString := tree.ContextualPath.String()
-	item, itemExists := a.MapTopicQTreeEntry[contextualPathString]
+	item, itemExists := app.MapTopicQTreeEntry[tree.ContextualPath.String()]
 
-	if itemExists {
-		// log.Default().Println("Found!", contextualPathString, a.MapTopicQTreeEntry[contextualPathString])
+	if !itemExists {
+		item = qt6.NewQTreeWidgetItem()
+		item.SetExpanded(true)
+		item.SetText(0, tree.ContextualPath.Suffix())
+		app.MapTopicQTreeEntry[tree.ContextualPath.String()] = item
+		app.MapUnsafeQTreeItemTopic[item.UnsafePointer()] = tree.ContextualPath.String()
 
-		if tree.RelatedPacket != nil {
-			item.SetText(1, string(tree.RelatedPacket.Payload))
-			a.MapTopicPacket[contextualPathString] = tree.RelatedPacket
-			// go blinkUpdateItem(item)
-		}
-
-		for _, child := range tree.Children {
-			a.UpdateTree(child)
-		}
-
-		return item
+		log.Default().Println("Created", tree.ContextualPath.String(), item)
 	}
-
-	item = qt6.NewQTreeWidgetItem()
-
-	item.SetText(0, tree.ContextualPath[len(tree.ContextualPath)-1])
-
-	if tree.RelatedPacket != nil {
-		item.SetText(1, string(tree.RelatedPacket.Payload))
-		a.MapTopicPacket[contextualPathString] = tree.RelatedPacket
-		log.Default().Println("Created", contextualPathString, item)
-	}
-
-	font := item.Font(0)
-	if tree.IsVirtual() {
-		font.SetItalic(true)
-	} else {
-		font.SetItalic(false)
-	}
-	item.SetFont(0, font)
 
 	for _, child := range tree.Children {
-		childItem := a.UpdateTree(child)
+		childItem, _ := app.RenderTreeSkeleton(child)
 		item.AddChild(childItem)
 	}
 
 	if tree.ContextualPath.IsRoot() {
-		a.CurrentTreeWidget.AddTopLevelItem(item)
+		app.CurrentTreeWidget.AddTopLevelItem(item)
 	}
 
-	a.MapTopicQTreeEntry[contextualPathString] = item
-	a.MapUnsafeQTreeItemTopic[item.UnsafePointer()] = contextualPathString
-
-	return item
+	return item, !itemExists
 }
 
-func blinkUpdateItem(item *qt6.QTreeWidgetItem) {
-	font := item.Font(0)
-	font.SetBold(true)
-	mainthread.Wait(func() {
-		item.SetFont(0, font)
-	})
-
-	time.Sleep(200 * time.Millisecond)
-
-	font.SetBold(false)
-	mainthread.Wait(func() {
-		item.SetFont(0, font)
-	})
+func ExpandWithParents(item *qt6.QTreeWidgetItem) {
+	if item.Parent() != nil {
+		ExpandWithParents(item.Parent())
+		item.Parent().SetExpanded(true)
+	}
 }
 
 func (app *AppUi) ShowWithParents(item *qt6.QTreeWidgetItem) {

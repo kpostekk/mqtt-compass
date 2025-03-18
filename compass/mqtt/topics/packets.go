@@ -14,7 +14,19 @@ func (packet *IncomingPacket) ContextualPath() ContextualPath {
 type ContextualPath []string
 
 func (path *ContextualPath) String() string {
+	if len(*path) == 0 {
+		return "{root}"
+	}
+
 	return strings.Join(*path, CONTEXTUAL_PATH_SEPARATOR)
+}
+
+func (path *ContextualPath) Suffix() string {
+	if len(*path) == 0 {
+		return path.String()
+	}
+
+	return (*path)[len(*path)-1]
 }
 
 func (path *ContextualPath) IsRoot() bool {
