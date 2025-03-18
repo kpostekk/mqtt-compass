@@ -25,6 +25,8 @@ type AppUi struct {
 	MapTopicPacket          map[string]*topics.IncomingPacket
 	MapTopicQTreeEntry      map[string]*qt6.QTreeWidgetItem
 	MapUnsafeQTreeItemTopic map[unsafe.Pointer]string
+	PreviewWidget           *qt6.QWidget
+	PreviewLayout           *qt6.QLayout
 	TopicLock               sync.RWMutex
 	CurrentFilterText       string
 	InitialDraw             bool
@@ -58,7 +60,7 @@ func NewAppUi() *AppUi {
 	widgetMain.SetLayout(layoutMain.QLayout)
 	windowMain.SetCentralWidget(widgetMain)
 
-	brokerViewer, brokerTreeWidget, brokerFilterField := NewBrokerViewer(widgetMain)
+	brokerViewer, brokerTreeWidget, brokerFilterField, labelNoSelected, previewLayout := NewBrokerViewer(widgetMain)
 
 	layoutMain.AddWidget(brokerViewer)
 
@@ -71,6 +73,8 @@ func NewAppUi() *AppUi {
 		MapUnsafeQTreeItemTopic: make(map[unsafe.Pointer]string),
 		InitialDraw:             true,
 		TopicLock:               sync.RWMutex{},
+		PreviewWidget:           labelNoSelected.QWidget,
+		PreviewLayout:           previewLayout.QLayout,
 		CurrentFilterText:       "",
 	}
 }
@@ -127,6 +131,13 @@ func (app *AppUi) SetConnection(ctx *context.Context) {
 		selectedPacket := app.MapTopicPacket[selectedTopic]
 		fmt.Println(selectedTopic, selectedPacket)
 
+		if selectedPacket != nil {
+			previewWidget := CreatePreviewWidget(selectedPacket)
+			app.PreviewLayout.ReplaceWidget(app.PreviewWidget, previewWidget.QWidget, qt6.FindDirectChildrenOnly)
+			app.PreviewWidget = previewWidget.QWidget
+		}
+
+
 		app.TopicLock.RUnlock()
 	})
 
@@ -146,7 +157,7 @@ func (app *AppUi) SetConnection(ctx *context.Context) {
 			})
 
 			mainthread.Wait(func() {
-				app.UpdateTree(updatesTree)
+				app.UpdateTreeValues(updatesTree)
 			})
 
 			app.TopicLock.Unlock()
@@ -158,35 +169,4 @@ func (app *AppUi) SetConnection(ctx *context.Context) {
 	mainthread.Wait(func() {
 		app.CurrentTreeWidget.SetFocus()
 	})
-}
-
-func NewConnectDialog(parent *qt6.QWidget) *qt6.QDialog {
-	dialog := qt6.NewQDialog(parent)
-	dialog.SetFixedSize(
-		qt6.NewQSize2(320, 240),
-	)
-	dialog.SetWindowTitle("Connect to MQTT Broker")
-	dialog.SetModal(true)
-
-	layout := qt6.NewQFormLayout(dialog.QWidget)
-	layout.SetFormAlignment(qt6.AlignCenter)
-
-	brokerAddress := qt6.NewQLineEdit(dialog.QWidget)
-	brokerAddress.SetPlaceholderText("mqtt://localhost:1883")
-	layout.AddRow3("Broker Address", brokerAddress.QWidget)
-
-	connectButton := qt6.NewQPushButton(dialog.QWidget)
-	connectButton.SetText("Connect")
-	connectButton.SetIcon(qt6.QIcon_FromTheme("network-connect"))
-	layout.AddRowWithWidget(connectButton.QWidget)
-
-	// connectButton.OnClicked(func() {
-	// 	dialog.Close()
-	// })
-
-	// dialog.OnCloseEvent(func(_ func(_ *qt6.QCloseEvent), _ *qt6.QCloseEvent) {
-	// 	qt6.QCoreApplication_Quit()
-	// })
-
-	return dialog
 }

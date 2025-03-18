@@ -7,7 +7,7 @@ import (
 	"github.com/mappu/miqt/qt6"
 )
 
-func NewBrokerViewer(parent *qt6.QWidget) (*qt6.QWidget, *qt6.QTreeWidget, *qt6.QLineEdit) {
+func NewBrokerViewer(parent *qt6.QWidget) (*qt6.QWidget, *qt6.QTreeWidget, *qt6.QLineEdit, *qt6.QLabel, *qt6.QVBoxLayout) {
 	viewerWidget := qt6.NewQWidget(parent)
 	layout := qt6.NewQHBoxLayout(viewerWidget)
 
@@ -27,30 +27,30 @@ func NewBrokerViewer(parent *qt6.QWidget) (*qt6.QWidget, *qt6.QTreeWidget, *qt6.
 	topicTreeWidget.SetSortingEnabled(true)
 	topicsLayout.AddWidget(topicTreeWidget.QWidget)
 
-	detailsWidget := qt6.NewQWidget(viewerWidget)
-	detailsLayout := qt6.NewQVBoxLayout(detailsWidget)
-	detailsLayout.SetSpacing(12)
-	detailsWidget.SetFixedWidth(240)
-	layout.AddWidget(detailsWidget)
+	previewWidget := qt6.NewQWidget(viewerWidget)
+	previewLayout := qt6.NewQVBoxLayout(previewWidget)
+	previewLayout.SetSpacing(12)
+	previewWidget.SetFixedWidth(240)
+	layout.AddWidget(previewWidget)
 
-	labelNoTopic := qt6.NewQLabel(detailsWidget)
+	labelNoTopic := qt6.NewQLabel(previewWidget)
 	labelNoTopic.SetText("No topic selected")
 	labelNoTopic.Font().SetItalic(true)
 	labelNoTopic.SetAlignment(qt6.AlignCenter)
-	detailsLayout.AddWidget(labelNoTopic.QWidget)
+	previewLayout.AddWidget(labelNoTopic.QWidget)
 
-	subscriptionsButton := qt6.NewQPushButton(detailsWidget)
+	subscriptionsButton := qt6.NewQPushButton(previewWidget)
 
 	subscriptionsButton.SetText("Subscriptions")
 	subscriptionsButton.SetIcon(qt6.QIcon_FromTheme("list-add"))
-	detailsLayout.AddWidget(subscriptionsButton.QWidget)
+	previewLayout.AddWidget(subscriptionsButton.QWidget)
 
-	return viewerWidget, topicTreeWidget, filterInput
+	return viewerWidget, topicTreeWidget, filterInput, labelNoTopic, previewLayout
 }
 
-func (app *AppUi) UpdateTree(tree *topics.VirtualTopicTree) {
+func (app *AppUi) UpdateTreeValues(tree *topics.VirtualTopicTree) {
 	if tree.RelatedPacket != nil {
-		log.Default().Println("Updating entry", tree.ContextualPath.String())
+		log.Default().Println("Updating entry", tree.ContextualPath.String(), "->", string(tree.RelatedPacket.Payload))
 		app.MapTopicQTreeEntry[tree.ContextualPath.String()].SetText(1, string(tree.RelatedPacket.Payload))
 		app.MapTopicPacket[tree.ContextualPath.String()] = tree.RelatedPacket
 	}
